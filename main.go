@@ -1,7 +1,10 @@
 package main
 
 import (
+	"encoding/base64"
+	"errors"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"os/signal"
@@ -26,7 +29,8 @@ import (
 
 type Message struct {
 	PhoneNumber string `json:"phoneNumber"`
-	Message string `json:"message"`
+	Message    string `json:"message"`
+	Image      string `json:"image"`
 }
 
 var  log waLog.Logger
@@ -82,15 +86,76 @@ func main() {
 			return
 		}
 
-		msg := &waProto.Message{Conversation: proto.String(req.Message)}
-		phoneNumber, _ := parseJID(req.PhoneNumber)
-		resp, err := client.SendMessage(context.Background(), phoneNumber, msg)
-		if err != nil {
-			fmt.Println("error", err)
+		err := validateRequest(req.PhoneNumber, req.Message)
+		if  err != nil {
 			c.JSON(400, gin.H{
 				"message": "error send message",
 			})
 			return
+		}
+
+		fmt.Println("log image", setImage(req.Image))
+
+		uploaded := whatsmeow.UploadResponse{}
+		msg := &waProto.Message{}
+		// upload image
+		if req.Image != "" {
+			client.Connect()
+			// if err != nil {
+			// 	return nil, err
+			// }
+			// resUploaded, err := uploadImage(client, req.Image)
+			// if err != nil {
+			// 	c.JSON(400, gin.H{
+			// 		"message": "error upload file atau image",
+			// 	})
+			// 	return
+			// }
+
+			// fmt.Println("log uploadedd", uploaded)
+
+			// uploaded = *resUploaded
+			fileName := setImage(req.Image)
+			data, err := os.ReadFile(fileName)
+			if err != nil {
+				log.Errorf("Failed to read %s: %v", fileName, err)
+			}
+			uploaded , err = client.Upload(context.Background(), data, whatsmeow.MediaImage)
+			if err != nil {
+				log.Errorf("Failed to upload file: %v", err)
+			}
+
+			msg = &waProto.Message{ImageMessage: &waProto.ImageMessage{
+				Caption:       &req.Message,
+				URL:           proto.String(uploaded.URL),
+				DirectPath:    proto.String(uploaded.DirectPath),
+				MediaKey:      uploaded.MediaKey,
+				Mimetype:      proto.String(http.DetectContentType(data)),
+				FileEncSHA256: uploaded.FileEncSHA256,
+				FileSHA256:    uploaded.FileSHA256,
+				FileLength:    proto.Uint64(uint64(len(data))),
+			}}
+
+		} else {
+			msg = &waProto.Message{Conversation: proto.String(req.Message)}
+		}
+
+		fmt.Println("msg", msg)
+
+		phoneNumber, _ := parseJID(req.PhoneNumber)
+		resp, err := client.SendMessage(context.Background(), phoneNumber, msg, whatsmeow.SendRequestExtra{
+			MediaHandle: uploaded.Handle,
+		})
+
+		if err != nil {
+			err := client.Connect()
+			if err != nil {
+				fmt.Println("error connect client", err)
+				c.JSON(400, gin.H{
+					"message": err.Error(),
+				})
+			}
+
 		} else {
 			c.JSON(200, gin.H{
 				"message": "success send message",
@@ -175,4 +240,59 @@ func parseJID(arg string) (types.JID, bool) {
 		}
 		return recipient, true
 	}
+}
+
+func validateRequest(phoneNumber, msg string) error {
+	if phoneNumber == "" {
+		return errors.New("phone Number not empty")
+	}
+
+	if msg == "" {
+		return errors.New("phone Number not empty")
+	}
+
+	return nil
+}
+
+func uploadImage(client *whatsmeow.Client, fileBase64 string) (*whatsmeow.UploadResponse, error)  {
+	err := client.Connect()
+	if err != nil {
+		return nil, err
+	}
+
+	fileName := setImage(fileBase64)
+	data, err := os.ReadFile(fileName)
+	if err != nil {
+		log.Errorf("Failed to read %s: %v", fileName, err)
+		return nil, err
+	}
+	uploaded , err := client.Upload(context.Background(), data, whatsmeow.MediaImage)
+	if err != nil {
+		log.Errorf("Failed to upload file: %v", err)
+	}
+
+	return &uploaded, nil
+}
+
+func setImage(imageBase64 string) string {
+	// Decode string Base64 menjadi byte array
+	imageData, err := base64.StdEncoding.DecodeString(imageBase64)
+	if err != nil {
+		fmt.Println("Error decoding Base64 string:", err)
+		return ""
+	}
+
+	// Nama file gambar yang akan disimpan
+	fileName := "image_ppr.png"
+
+	// Simpan byte array sebagai file gambar
+	err = ioutil.WriteFile(fileName, imageData, 0644)
+	if err != nil {
+		fmt.Println("Error saving image:", err)
+		return ""
+	}
+
+	fmt.Println("Image saved successfully as", fileName)
+
+	return fileName
 }
