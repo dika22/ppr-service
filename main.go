@@ -94,37 +94,31 @@ func main() {
 			return
 		}
 
-		fmt.Println("log image", setImage(req.Image))
-
-		uploaded := whatsmeow.UploadResponse{}
+		upload := &whatsmeow.UploadResponse{}
 		msg := &waProto.Message{}
 		// upload image
 		if req.Image != "" {
-			client.Connect()
-			// if err != nil {
-			// 	return nil, err
-			// }
-			// resUploaded, err := uploadImage(client, req.Image)
-			// if err != nil {
-			// 	c.JSON(400, gin.H{
-			// 		"message": "error upload file atau image",
-			// 	})
-			// 	return
-			// }
-
-			// fmt.Println("log uploadedd", uploaded)
-
-			// uploaded = *resUploaded
 			fileName := setImage(req.Image)
 			data, err := os.ReadFile(fileName)
 			if err != nil {
 				log.Errorf("Failed to read %s: %v", fileName, err)
 			}
-			uploaded , err = client.Upload(context.Background(), data, whatsmeow.MediaImage)
+			uploaded, err := uploadImage(client, data)
 			if err != nil {
-				log.Errorf("Failed to upload file: %v", err)
+				log.Errorf("Failed upload image: %v", err)
+				c.JSON(400, gin.H{
+					"message": "error upload file atau image",
+				})
+				return
 			}
 
+			if uploaded == nil {
+				c.JSON(400, gin.H{
+					"message": "error upload file atau image failed",
+				})
+			}
+
+			upload = uploaded
 			msg = &waProto.Message{ImageMessage: &waProto.ImageMessage{
 				Caption:       &req.Message,
 				URL:           proto.String(uploaded.URL),
@@ -140,11 +134,9 @@ func main() {
 			msg = &waProto.Message{Conversation: proto.String(req.Message)}
 		}
 
-		fmt.Println("msg", msg)
-
 		phoneNumber, _ := parseJID(req.PhoneNumber)
 		resp, err := client.SendMessage(context.Background(), phoneNumber, msg, whatsmeow.SendRequestExtra{
-			MediaHandle: uploaded.Handle,
+			MediaHandle: upload.Handle,
 		})
 
 		if err != nil {
@@ -197,13 +189,11 @@ func eventHandler(evt interface{}) {
 }
 
 func GenerateQRCode(client *whatsmeow.Client) *string {
+	// set and check connection
+	setClientConnection(client)
 	if client.Store.ID == nil {
 		// No ID stored, new login
 		qrChan, _ := client.GetQRChannel(context.Background())
-		err := client.Connect()
-		if err != nil {
-			panic(err)
-		}
 		for evt := range qrChan {
 			if evt.Event == "code" {
 				return &evt.Code
@@ -254,18 +244,11 @@ func validateRequest(phoneNumber, msg string) error {
 	return nil
 }
 
-func uploadImage(client *whatsmeow.Client, fileBase64 string) (*whatsmeow.UploadResponse, error)  {
-	err := client.Connect()
-	if err != nil {
-		return nil, err
-	}
+func uploadImage(client *whatsmeow.Client, data []byte) (*whatsmeow.UploadResponse, error)  {
 
-	fileName := setImage(fileBase64)
-	data, err := os.ReadFile(fileName)
-	if err != nil {
-		log.Errorf("Failed to read %s: %v", fileName, err)
-		return nil, err
-	}
+	// set and check connection
+	setClientConnection(client)
+	
 	uploaded , err := client.Upload(context.Background(), data, whatsmeow.MediaImage)
 	if err != nil {
 		log.Errorf("Failed to upload file: %v", err)
@@ -284,7 +267,6 @@ func setImage(imageBase64 string) string {
 
 	// Nama file gambar yang akan disimpan
 	fileName := "image_ppr.png"
-
 	// Simpan byte array sebagai file gambar
 	err = ioutil.WriteFile(fileName, imageData, 0644)
 	if err != nil {
@@ -293,6 +275,12 @@ func setImage(imageBase64 string) string {
 	}
 
 	fmt.Println("Image saved successfully as", fileName)
-
 	return fileName
+}
+
+func setClientConnection(client *whatsmeow.Client)  {
+	if !client.IsConnected() {
+		err := client.Connect()
+		fmt.Println("error client connection", err)
+	}
 }
