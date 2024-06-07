@@ -1,1 +1,3 @@
-go run main.go
+``go run main.go``
+
+``cp .env-sample .env``
