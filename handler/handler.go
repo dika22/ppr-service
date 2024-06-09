@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"ppr-service/models"
 	ps "ppr-service/service"
@@ -25,7 +26,8 @@ func NewPprHandler(ps ps.PprService) PprHandlerImpl {
 
 // Login
 func (h PprHandler) Login(c *gin.Context) {
-	res, err := h.PprService.Login()
+	ctx := context.Background()
+	res, err := h.PprService.Login(ctx)
 	if err != nil {
 		c.JSON(400, gin.H{
 			"message": err.Error(),

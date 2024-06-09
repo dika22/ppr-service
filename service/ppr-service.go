@@ -17,7 +17,7 @@ import (
 )
 
 type PprService interface {
-	Login() ([]byte, error)
+	Login(ctx context.Context) ([]byte, error)
 	SendMessage(req models.Message) (*whatsmeow.SendResponse, error)
 }
 
@@ -31,8 +31,8 @@ func NewPprService(cli *whatsmeow.Client) PprService  {
 	}
 }  
 
-func (s pprService) Login() ([]byte, error) {
-	qrString := GenerateQRCode(s.client)
+func (s pprService) Login(ctx context.Context) ([]byte, error) {
+	qrString := GenerateQRCode(ctx, s.client)
 	if qrString == nil {
 		return nil, errors.New("already login")
 	}
@@ -84,12 +84,12 @@ func (s pprService) SendMessage(req models.Message) (*whatsmeow.SendResponse, er
 	return &resp, nil
 }
 
-func GenerateQRCode(client *whatsmeow.Client) *string {
+func GenerateQRCode(ctx context.Context, client *whatsmeow.Client) *string {
 	// set and check connection
-	setClientConnection(client)
 	if client.Store.ID == nil {
 		// No ID stored, new login
-		qrChan, _ := client.GetQRChannel(context.Background())
+		qrChan, _ := client.GetQRChannel(ctx)
+		setClientConnection(client)
 		for evt := range qrChan {
 			if evt.Event == "code" {
 				return &evt.Code
@@ -116,12 +116,11 @@ func setClientConnection(client *whatsmeow.Client)  {
 }
 
 func uploadImage(client *whatsmeow.Client, data []byte) (*whatsmeow.UploadResponse, error)  {
-
 	// set and check connection
 	setClientConnection(client)
 	uploaded , err := client.Upload(context.Background(), data, whatsmeow.MediaImage)
 	if err != nil {
-		fmt.Sprintf("Failed to upload file: %s", err.Error())
+		return nil, err
 	}
 
 	return &uploaded, nil
